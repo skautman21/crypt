@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>crypto</name>
+	<name>crypto-tool</name>
 	<comment></comment>
 	<projects>
 		<project>crypt</project>
+		<project>narcrypt</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>
