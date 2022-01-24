@@ -12,6 +12,39 @@
 
 #include <na-container.h>
 
+namespace nc
+{
+namespace utils
+{
+
+void generarate_crc32_lut(uint32_t * table)
+{
+	using nc::container::CRC32_POLY;
+	for (unsigned i = 0; i < 256; ++i)
+	{
+		uint32_t b = i;
+		for (unsigned j = 0; j < 8; ++j)
+		{
+			if (b & 1)
+			{
+				b = (b >> 1) ^ CRC32_POLY;
+			}
+			else
+			{
+				b = (b >> 1);
+			}
+			table[i] = b;
+		}
+	}
+}
+uint32_t update_crc32(uint32_t *table, uint8_t b, uint32_t crc)
+{
+	crc = table[(crc ^ b) & 0xff];
+	return crc;
+}
+}
+}
+
 const char * TEST_KEY_FILE = "test-key-file.ncc";
 const char * TEST_FILE_NAME = "test.txt";
 const char * TEST_CONTAINER_NAME = "test-container.ncc";
@@ -61,18 +94,29 @@ void test_create_container()
 	md.file.block_count = filesize / (TEST_BLOCK_SIZE / 8);
 	if (filesize % (TEST_BLOCK_SIZE / 8) > 0)
 		md.file.block_count++;
+	auto file_header_pos = dst_file.tellp();
 	dst_file.write(reinterpret_cast<char*>(&md), FILE_METADATA_SIZE_V1_BASE);
-	dst_file.write(TEST_FILE_NAME, name_length + 1);
+		dst_file.write(TEST_FILE_NAME, name_length + 1);
+
+	uint32_t crc32 = 0;
+	uint32_t crc32_table[256];
+	nc::utils::generarate_crc32_lut(crc32_table);
 
 	for (uint64_t block = 0; block <md.file.block_count; block++)
 	{
 		uint8_t buffer[TEST_BLOCK_SIZE / 8] {};
 		src_file.read	(reinterpret_cast<char*>(&buffer[0]),
 				TEST_BLOCK_SIZE / 8);
+		for (unsigned k = 0; k < TEST_BLOCK_SIZE /8; ++k)
+				{
+					crc32 = nc::utils::update_crc32(crc32_table, buffer[k], crc32);
+				}
 		dst_file.write(reinterpret_cast<char*>(&buffer[0]),
 				TEST_BLOCK_SIZE / 8);
 	}
-
+	md.file.crc32=crc32;
+	dst_file.seekp(file_header_pos);
+	dst_file.write(reinterpret_cast<char*>(&md), FILE_METADATA_SIZE_V1_BASE);
 	src_file.close();
 	dst_file.close();
 }
@@ -90,13 +134,13 @@ void test_extract_container()
 			sizeof(header));
 	if (hdr.magic != MAGIC) {
 		std::cerr <<
-				"Ôàéë êîíòåéíåðà ñëîìàí êàê ìîå ñåðäöå :("
+				"Ã”Ã Ã©Ã« ÃªÃ®Ã­Ã²Ã¥Ã©Ã­Ã¥Ã°Ã  Ã±Ã«Ã®Ã¬Ã Ã­ ÃªÃ Ãª Ã¬Ã®Ã¥ Ã±Ã¥Ã°Ã¤Ã¶Ã¥ :("
 				<< std::endl;
 		return;
 	}
 	if (hdr.v1.payload != RAW) {
 		std::cerr <<
-				"Â êîíòåéíåðå íå RAW!"
+				"Ð’ ÐºÐ¾Ð½Ñ‚ÐµÐ¹Ð½ÐµÑ€Ðµ Ð½Ðµ RAW!"
 				<< std::endl;
 		return;
 	}
@@ -116,25 +160,39 @@ void test_extract_container()
 	dst_file.open(orig_file_name.c_str(), std::ios::binary);
 	src_file.seekg(pos_after_header + md.length);
 
+	uint32_t crc32 = 0;
+	uint32_t crc32_table[256];
+	nc::utils::generarate_crc32_lut(crc32_table);
 	while(md.file.orig_length > 0)
 	{
 		uint8_t buffer[TEST_BLOCK_SIZE / 8] {};
 		src_file.read(reinterpret_cast<char*>(&buffer[0]),
 				TEST_BLOCK_SIZE / 8);
 		uint64_t bytes_to_write = std::min<unsigned long>(4UL, md.file.orig_length);
+		uint8_t buffer_for_crc32[TEST_BLOCK_SIZE / 8] {};
+		for (unsigned k = 0; k < TEST_BLOCK_SIZE /8; ++k)
+					{
+						buffer_for_crc32[k] = buffer[k];
+					}
 		dst_file.write(
 				reinterpret_cast<char*>(&buffer[0]),
 				bytes_to_write);
+		for (unsigned k = 0; k < TEST_BLOCK_SIZE /8; ++k)
+				{
+					crc32 = nc::utils::update_crc32(crc32_table, buffer_for_crc32[k], crc32);
+				}
 		md.file.orig_length -= bytes_to_write;
 
 	}
-
+	if (crc32 != md.file.crc32) {
+			std::cout << "Ð’Ð½Ð¸Ð¼Ð°Ð½Ð¸Ðµ! Ð¥ÑÑˆ Ð½Ðµ ÑÐ¾Ð²Ð¿Ð°Ð´Ð°ÐµÑ‚ Ñ Ñ€Ð°ÑÐ¿Ð°ÐºÐ¾Ð²Ð°Ð½Ð½Ñ‹Ð¼Ð¸ Ð´Ð°Ð½Ð½Ð°Ð¼Ð¸" << std::endl;
+		}
 	dst_file.close();
 	src_file.close();
 
 
 }
-
+ 
 void key_container(uint64_t key_length)
 {
     std::ofstream src_file;
@@ -144,7 +202,7 @@ void key_container(uint64_t key_length)
     if(!src_file.is_open())
         {
             std::cerr <<
-                    "File dont open!"
+                    "File dont open! "
                     << std::endl;
             return;
         }
@@ -1031,16 +1089,16 @@ void CTR_decryption(){
 int main (int argc, char ** argv)
 {
 	std::cout << "Start" << std::endl;
-	//test_create_container();
+	test_create_container();
 	//uint64_t key_length;
 	std::cout << "Key length:" << std::endl;
 	//std::cin >> key_length;
-	CTR_container();
+	//CTR_container();
 	//encryption();
 
 	std::cout << "50%" << std::endl;
 	//decryption();
-	//test_extract_container();
+	test_extract_container();
 	//key_container(key_length);
 	std::cout << "100%" << std::endl;
 	std::cout << "End" << std::endl;
