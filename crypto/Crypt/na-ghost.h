@@ -15,4 +15,4 @@ void gost_34_12_2018_64(
 }
 }
 
-#endif /* CTB_CRYPT_GOST_H_ */
+#endif /* NA_GOST_H_ */
